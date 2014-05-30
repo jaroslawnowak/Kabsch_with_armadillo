@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <thread>
 
 using namespace std;
 using namespace arma;
@@ -57,7 +58,7 @@ void read_number(char line[], int from, int length, double *result){
     *result = atof(num);
 }
 
-void read_file(const char *file, mat &points, vector<vector<bool> > &g_atom_found, char atoms[][5], int n_atoms){
+void read_file(const char *file, mat &points, rowvec &g_atom_found, char atoms[][5], int n_atoms){
     ifstream input(file);
     char buf[81];
     char c_aa[6], l_aa[6], atom[5];    
@@ -66,9 +67,10 @@ void read_file(const char *file, mat &points, vector<vector<bool> > &g_atom_foun
     c_aa[5] = '\0';
     l_aa[5] = '\0';
     atom[4] = '\0';
-    mat aa_atoms;
-    mat empty;
-    vector<bool> l_atom_found(n_atoms);
+    mat aa_atoms = zeros<mat>(3, n_atoms);
+    //mat empty = zeros<mat>(n_atoms,3);
+    rowvec l_atom_found = zeros<rowvec>(n_atoms);
+    //rowvec empty_vec = zeros<rowvec>(n_atoms);
     
     //cout << "Reading file " << file << endl;
     
@@ -89,12 +91,11 @@ void read_file(const char *file, mat &points, vector<vector<bool> > &g_atom_foun
                 
                 //cout << points << '\n';
                 
-                g_atom_found.push_back(l_atom_found);
+                g_atom_found = join_horiz(g_atom_found, l_atom_found);
             }
 			
-            vector<bool> new_atom_found(n_atoms);
-            aa_atoms=empty;
-            l_atom_found.swap(new_atom_found);
+            l_atom_found = zeros<rowvec>(n_atoms);
+            aa_atoms = zeros<mat>(3, n_atoms);
             
         }
         
@@ -113,25 +114,34 @@ void read_file(const char *file, mat &points, vector<vector<bool> > &g_atom_foun
             point(2) = z;
         
         
-            aa_atoms = join_horiz(aa_atoms, point);
+            aa_atoms.col(atom_index) = point;
             
-            l_atom_found[atom_index] = 1;
+            l_atom_found(atom_index) = 1.0;
         }
     }
     
     points = join_horiz(points, aa_atoms);
     
-    g_atom_found.push_back(l_atom_found);
+    g_atom_found = join_horiz(g_atom_found, l_atom_found);
 }
 
 
 
 bool read_files(const char* file1, const char* file2, mat &points1, mat &points2, char atoms[][5], int n_atoms){
     mat pos1, pos2;
-    vector<vector<bool> > atom_found1, atom_found2;
+    rowvec atom_found1, atom_found2;
+    rowvec total_atoms_found;
+    uvec logic_vec;
 	
-    read_file(file1, pos1, atom_found1, atoms, n_atoms);
-    read_file(file2, pos2, atom_found2, atoms, n_atoms);
+    //~ thread thread1(read_file, file1, ref(pos1), ref(atom_found1), atoms, n_atoms);
+    //~ thread thread2(read_file, file2, ref(pos2), ref(atom_found2), atoms, n_atoms);
+    //~ 
+    //~ thread1.join();
+    //~ thread2.join();
+    
+    read_file( file1, pos1, atom_found1, atoms, n_atoms);
+    read_file( file2, pos2, atom_found2, atoms, n_atoms);
+    
     
     // for(int i=0; i< pos1.size(); i++){
     //     cout << "Amino acid " << i << endl;
@@ -143,36 +153,43 @@ bool read_files(const char* file1, const char* file2, mat &points1, mat &points2
     //         cout << endl;
     //     }
     // }
-  
-    // cout << pos1.size()<< endl;
-    // cout << pos2.size()<< endl;
     
-    if(atom_found1.size() != atom_found2.size()){
+    total_atoms_found = atom_found1 % atom_found2;
+    
+    logic_vec = find(total_atoms_found==1);
+	
+	points1 = pos1.cols(logic_vec);
+    
+    points2 = pos2.cols(logic_vec);
+    
+    
+    
+    if(atom_found1.n_elem != atom_found2.n_elem){
         cout << "The PDB files have different number of Amino acids" << endl;
         return false;
     } 
-    
-    int index1=0;
-    int index2=0;
-    for(int i=0; i<atom_found1.size(); i++){
-        for(int j=0; j<n_atoms; j++){
-			
-            if(atom_found1[i][j] && atom_found2[i][j]){
-                points1 = join_horiz(points1, pos1.col(index1));
-                points2 = join_horiz(points2, pos2.col(index2));
-                //cout << i*n_atoms+j << ' ';
-            }
+    //~ 
+    //~ int index1=0;
+    //~ int index2=0;
+    //~ for(int i=0; i<atom_found1.size(); i++){
+        //~ for(int j=0; j<n_atoms; j++){
+			//~ 
+            //~ if(atom_found1[i][j] && atom_found2[i][j]){
+                //~ points1 = join_horiz(points1, pos1.col(index1));
+                //~ points2 = join_horiz(points2, pos2.col(index2));
+                //~ //cout << i*n_atoms+j << ' ';
+            //~ }
             //~ else{
 				//~ cout << i << ' '<< j << ' ' << atom_found1[i][j] <<'\n';
 				//~ cout << i << ' '<< j << ' ' << atom_found2[i][j] <<'\n';
 			//~ }
+			
 			//~ 
-			
-			index1+=atom_found1[i][j];
-			
-			index2+=atom_found2[i][j];
-        }
-    }
+			//~ index1+=atom_found1[i][j];
+			//~ 
+			//~ index2+=atom_found2[i][j];
+        //~ }
+    //~ }
     
     
     return true;
@@ -304,11 +321,13 @@ int main(int argc, char** argv)
 			//~ P2_mat = join_horiz(P2_mat, b);
 	//~ }
 	
-
-	read_files(file1, file2, P1_mat, P2_mat, atoms, 4);
-	
-	for(int k=1; k<10000; k++)
+	for(int k=0; k<100000; k++)
+	{
+		read_files(file1, file2, P1_mat, P2_mat, atoms, 4);
 		P1_kabsch=Kabsch(P1_mat, P2_mat , &rmsd);
+	}
+	
+	//cout << rmsd << '\n';
 	
 	return 0;
 }
