@@ -1,10 +1,12 @@
-#include <iostream>
 #include <armadillo>
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <thread>
+
+#include <iomanip>
+#include <sstream>
 
 using namespace std;
 using namespace arma;
@@ -133,14 +135,14 @@ bool read_files(const char* file1, const char* file2, mat &points1, mat &points2
     rowvec total_atoms_found;
     uvec logic_vec;
 	
-    //~ thread thread1(read_file, file1, ref(pos1), ref(atom_found1), atoms, n_atoms);
-    //~ thread thread2(read_file, file2, ref(pos2), ref(atom_found2), atoms, n_atoms);
-    //~ 
-    //~ thread1.join();
-    //~ thread2.join();
+    thread thread1(read_file, file1, ref(pos1), ref(atom_found1), atoms, n_atoms);
+    thread thread2(read_file, file2, ref(pos2), ref(atom_found2), atoms, n_atoms);
     
-    read_file( file1, pos1, atom_found1, atoms, n_atoms);
-    read_file( file2, pos2, atom_found2, atoms, n_atoms);
+    thread1.join();
+    thread2.join();
+    //~ 
+    //~ read_file( file1, pos1, atom_found1, atoms, n_atoms);
+    //~ read_file( file2, pos2, atom_found2, atoms, n_atoms);
     
     
     // for(int i=0; i< pos1.size(); i++){
@@ -279,7 +281,85 @@ mat Kabsch(mat P, mat Q, double* rmsd)
 	return P_finish;
 }
 
+string format_number(double Number_to_format)
+{
+	int wspc_missing;
+	
+	string Result;
+	
+	string complete_string;
+	
+	ostringstream Convert;
+	
+	Convert << fixed << setprecision(3) << Number_to_format;
+	
+	Result = Convert.str();
+	
+	wspc_missing = 7 - Result.length();
+	
+	complete_string = string(wspc_missing, ' ') + Result;
+	
+	return complete_string;
 
+}
+
+void write_modified_file(const char *original_file, mat P_mat, const char *result_file)
+{
+	
+	ifstream infile(original_file);
+	
+	ofstream pdb_modified;
+	
+	double x,y,z;
+	
+	int i;
+	
+	pdb_modified.open(result_file);
+	
+	string line;
+	
+	string x_string;
+	
+	string y_string;
+	
+	string z_string;
+	
+	i=0;
+	
+	while(getline(infile, line))
+	{
+		
+		if (line.compare(13, 3, "CA ")==0 or line.compare(13, 3, "N  ")==0 or line.compare(13, 3, "C  ")==0 or line.compare(13, 3, "O  ")==0)
+		
+		{
+			x = P_mat(0,i);
+			
+			y = P_mat(1,i);
+			
+			z = P_mat(2,i);
+			
+			x_string = format_number(x);
+			
+			y_string = format_number(y);
+			
+			z_string = format_number(z);
+			
+			line.replace(31,7,x_string);
+			
+			line.replace(39,7,y_string);
+			
+			line.replace(47,7,z_string);
+			
+			//~ cout << line << line.length() << '\n';
+			
+			pdb_modified << line << '\n';
+			
+			i++;
+		}
+	}
+	
+	pdb_modified.close();
+}
 
 int main(int argc, char** argv)
 {
@@ -308,7 +388,8 @@ int main(int argc, char** argv)
 	
 	const char *file1 = "p1.pdb";
 	const char *file2 = "p2.pdb";
-	
+	const char *result_file1 = "p1_modif.pdb";
+	const char *result_file2 = "p2_modif.pdb";
 	
 	
 	//~ for(std::vector<vector<double> >::iterator it = p1.begin(); it != p1.end(); ++it) {
@@ -321,13 +402,14 @@ int main(int argc, char** argv)
 			//~ P2_mat = join_horiz(P2_mat, b);
 	//~ }
 	
-	for(int k=0; k<100000; k++)
-	{
-		read_files(file1, file2, P1_mat, P2_mat, atoms, 4);
-		P1_kabsch=Kabsch(P1_mat, P2_mat , &rmsd);
-	}
+
+	read_files(file1, file2, P1_mat, P2_mat, atoms, 4);
+	P1_kabsch=Kabsch(P1_mat, P2_mat , &rmsd);
 	
-	//cout << rmsd << '\n';
+	write_modified_file(file1, P1_kabsch, result_file1);
+	write_modified_file(file2, P2_mat, result_file2);
+	
+	cout << rmsd << '\n';
 	
 	return 0;
 }
